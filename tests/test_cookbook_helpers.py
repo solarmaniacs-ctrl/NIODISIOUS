@@ -794,9 +794,15 @@ def test_local_windows_download_pid_tracks_inner_bash_and_stop_kills_tree():
     assert "/proc/$$/winpid" in routes_src
     assert "pid_ready_path.touch()" in routes_src
     assert '\\"$$\\" > {pp}' not in routes_src
+    assert "/api/cookbook/stop-session" in routes_src
+    assert "_scan_windows_session_pids" in routes_src
+    assert "_cmdline_references_hf_repo" in routes_src
+    assert "grep -Fxq" in routes_src
     assert "function Stop-Tree([int]$Id)" in running_src
     assert "('ParentProcessId = ' + $Id)" in running_src
     assert "Stop-Tree ([int]$p)" in running_src
+    assert "_stopCookbookSession" in running_src
+    assert "_winSessionStopTreePs" in running_src
 
 
 def test_llama_cpp_rebuild_cmd_runs_clean_on_a_fresh_home(tmp_path):
