@@ -129,6 +129,38 @@ function _syncCustomThemesToServer(ct) {
 }
 
 // --- Syntax color derivation from theme base colors ---
+// WCAG relative luminance (0..1). Used to choose readable text for content
+// painted on a --red background: --red is theme-configurable, and a light
+// accent needs dark text where a darker one reads fine with white.
+// HSL lightness is not a substitute -- #e06c75 and #f2c14e sit at nearly
+// identical HSL-L but 0.27 vs 0.56 luminance, since the WCAG formula
+// weights green (0.7152) far above red (0.2126) and blue (0.0722).
+function _relativeLuminance(hex) {
+  const { r, g, b } = hexToRgb(hex) || { r: 0, g: 0, b: 0 };
+  const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+// Pick a readable foreground for an arbitrary background: white unless it
+// would fall below ~3:1, in which case near-black. Shared by every
+// accent-painted surface so each one is judged against the background it
+// actually renders, not a global accent.
+function _readableOn(bgHex) {
+  const contrastWithWhite = 1.05 / (_relativeLuminance(bgHex) + 0.05);
+  return contrastWithWhite < 3 ? '#171717' : '#fff';
+}
+
+// sRGB mix matching CSS color-mix(in srgb, a pct%, b). Needed where a
+// surface's background is itself a mix, e.g. the new-chat send button.
+function _mixSrgb(aHex, bHex, aPct) {
+  const a = hexToRgb(aHex) || { r: 0, g: 0, b: 0 };
+  const b = hexToRgb(bHex) || { r: 0, g: 0, b: 0 };
+  const w = Math.max(0, Math.min(1, aPct));
+  const ch = (x, y) => Math.round(x * w + y * (1 - w));
+  const hex = (n) => n.toString(16).padStart(2, '0');
+  return `#${hex(ch(a.r, b.r))}${hex(ch(a.g, b.g))}${hex(ch(a.b, b.b))}`;
+}
+
 function hexToHSL(hex) {
   const rgb = hexToRgb(hex) || { r: 0, g: 0, b: 0 };
   const r = rgb.r / 255;
@@ -261,6 +293,10 @@ export function applyColors(colors) {
   s.setProperty('--panel', colors.panel);
   s.setProperty('--border', colors.border);
   if (colors.red) s.setProperty('--red', colors.red);
+  // Foreground for surfaces painted with --red itself. Surfaces with an
+  // independently configurable background get their own token below,
+  // once the advanced overrides have been resolved.
+  s.setProperty('--on-accent', _readableOn(colors.red || '#e06c75'));
 
   // Keep the mobile browser toolbar / status bar matched to the theme bg
   // (same as the early head-script does on first paint).
@@ -286,6 +322,31 @@ export function applyColors(colors) {
   for (const { key, css } of ADV_KEYS) {
     s.setProperty(css, adv[key] || defaults[key]);
   }
+
+  // Primary-accent surfaces can be independently overridden from --red, so
+  // derive their foreground from the background they actually use.
+  const _accentPrimary = adv.accentPrimary || colors.red || '#e06c75';
+  s.setProperty('--accent-primary', _accentPrimary);
+  s.setProperty('--on-accent-primary', _readableOn(_accentPrimary));
+  const _accentPrimaryHover = _mixSrgb(_accentPrimary, '#ffffff', 0.85);
+  s.setProperty('--accent-primary-hover', _accentPrimaryHover);
+  s.setProperty('--on-accent-primary-hover', _readableOn(_accentPrimaryHover));
+
+  // The send button's background is independently configurable
+  // (--send-btn-bg / --send-btn-hover), so a foreground derived from
+  // --red can be wrong for it: a dark accent with a light custom send
+  // button would keep white text on a light surface. Pair each of its
+  // rendered backgrounds with its own foreground instead.
+  const _sendBg = adv.sendBtnBg || defaults.sendBtnBg;
+  const _sendHoverBg = adv.sendBtnHover || defaults.sendBtnHover;
+  s.setProperty('--on-send-btn', _readableOn(_sendBg));
+  s.setProperty('--on-send-btn-hover', _readableOn(_sendHoverBg));
+  // The new-chat state blends the hover colour 85% into --panel, so it
+  // is a third distinct surface.
+  s.setProperty(
+    '--on-send-btn-newchat-hover',
+    _readableOn(_mixSrgb(_sendHoverBg, colors.panel || '#111111', 0.85)),
+  );
 
   // Update favicon to match theme accent color
   _updateFavicon(colors.red || '#e06c75');
