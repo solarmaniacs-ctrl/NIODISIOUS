@@ -9,6 +9,7 @@ import tempfile
 from typing import List, Dict, Any
 
 from src.llm_core import llm_call
+from src.constants import VISION_MAX_TOKENS, VISION_DESCRIBE_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -336,13 +337,13 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
     try:
         settings = _load_vl_settings()
         if not settings.get("vision_enabled", True):
-            return {"text": "[Vision is disabled — enable it in Settings → Vision]", "model": ""}
+            return {"text": "[Vision is disabled — enable it in Settings → AI Defaults → Vision]", "model": ""}
         vl_model = settings.get("vision_model", "")
 
         try:
             url, model_id, headers = _resolve_vl_model(vl_model, owner=owner)
         except ValueError:
-            return {"text": "[No vision model configured — set one in Settings → Vision]", "model": vl_model or ""}
+            return {"text": "[No vision model configured — set one in Settings → AI Defaults → Vision]", "model": vl_model or ""}
 
         with open(image_path, "rb") as f:
             img_data = base64.b64encode(f.read()).decode("utf-8")
@@ -355,12 +356,12 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image in detail"},
+                    {"type": "text", "text": VISION_DESCRIBE_PROMPT},
                     {"type": "image_url", "image_url": {"url": f"data:image/{img_format};base64,{img_data}"}},
                 ],
             }
         ]
-        # Vision-specific fallback chain (Settings → Vision → Fallbacks). A
+        # Vision-specific fallback chain (Settings → AI Defaults → Vision → Fallbacks). A
         # downed vision endpoint can fall through to the next configured model
         # — same shape as task/chat but its own list (`vision_model_fallbacks`).
         try:
@@ -372,7 +373,7 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
         last_err = None
         for i, (_url, _model, _headers) in enumerate([c for c in _vl_candidates if c and c[0] and c[1]]):
             try:
-                description = llm_call(_url, _model, vl_messages, headers=_headers, timeout=120)
+                description = llm_call(_url, _model, vl_messages, headers=_headers, timeout=300, max_tokens=VISION_MAX_TOKENS, temperature=0.2)
                 logger.info("VL analysis complete with model %s", _model)
                 return {"text": description, "model": _model}
             except Exception as e:
